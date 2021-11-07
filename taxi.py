@@ -189,6 +189,15 @@ class Agent:
         next_state_batch = torch.cat(batch.next_state)
         done_batch = torch.cat(batch.done)
 
+        # Compute prediced Q values - the model computes Q(s_t), then we select the
+        # columns of actions taken. These are the actions which would've been taken
+        # for each batch state according to policy_net
+        predicted_q_value = self.model(state_batch).gather(1, action_batch.unsqueeze(1))
+
+        # Compute the expected Q values
+        next_state_values = self.target_model(next_state_batch).max(1)[0]
+        expected_q_values = (~done_batch * next_state_values * self.config["rl"]["gamma"]) + reward_batch
+
     def update(self, state, new_state, reward, action):
         """
         Update the Qtable after an action results in new state and reward.

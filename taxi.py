@@ -89,6 +89,29 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
+class DQN(nn.module):
+
+    #def __init__(self,h,w, outputs):
+    def __init__(self, outputs):
+        super(DQN, self).__init__()
+        self.emb = nn.Embedding(500,4)
+        self.l1 = nn.Linear(4,50)
+        self.l2 = nn.Linear(50,50)
+        self.l3 = nn.Linear(50, outputs)
+
+        # For vision version.
+        #self.conv1 = nn.conv2d(500,12,kernel_size=5, stride=2)
+        #self.bn1 = nn.BatchNorm2d(12)
+        #self.conv1 = nn.conv2d(12,6,kernel_size=5, stride=2)
+        #self.bn1 = nn.BatchNorm2d(12)
+
+    def forward(self, x):
+        x = x.to(device)
+        x = F.relu(self.l1(self.emb(x)))
+        x = F.relu(self.l2(self.l1(x)))
+        x = self.l3(x)
+        return x
+
 class Agent:
     """
     From source code: https://github.com/openai/gym/blob/master/gym/envs/toy_text/taxi.py
@@ -101,35 +124,70 @@ class Agent:
     Four additional states can be observed right after a successful episodes, when both the passenger and the taxi are at the destination.
                 This gives a total of 404 reachable discrete states.
     """
-    def __init__(self, envm, epsilon):
+    def __init__(self, env, config):
         self.seed=SEED
         self.rng = default_rng(SEED)
         self.number_states = env.observation_space.n
         self.number_actions = env.action_space.n
-        #self.Qtable=np.zeros((self.number_states,self.number_actions))
         self.Qtable=self.rng.random((self.number_states,self.number_actions))
-        self.epsilon = epsilon
+        self.epsilon = config["epsilon"]
         self.epsilon_min = self.epsilon*1e-4
         self.step_count = 0
+        self.device = device
+        self.memory = None
 
-    def action(self, state, step, operation):
-        """
-        Choose the next action based on the current Q-table.
-        Return a random integer for inital state
-        """
+    def compile(self):
+        """ Initialize the model """
+        n_actions = self.number_actions
 
-        if operation == 'training' and random.uniform(0,1) < self.epsilon:
+        self.model = DQN(n_actions).to(self.device)
+        self.targe_model = DQN(n_actions).to(self.device)
+        self.target_model.eval() # Evaluation mode. train = false
+        self.optimizer = optim.Adam(self.model.parameters(), 
+                lr=self.config["training"]["learning_rate"])
+
+    def _get_epsilon(self,episode):
+        eps = self.epsilon
+        epsilon = eps["min_epsilon"] + (eps["max_epsilon"] - eps["min_epsilon"])*\
+                np.exp(-episode / eps["decay_epsilon"])
+                
+    def _get_action(self, state):
+        with torch.no_grad():
+            # t.max(1) will return largest column value of each row.
+            # second column on max result is index of where max element was
+            # found, so we pick action with the larger expected reward.
+            predicted = self.model(torch.tensor([state], device=self.device))
+            action = predicted.max(1)[1]
+        return action.item()
+
+    def _choose_action(self, state, epsilon):
+        if self.rng.uniform() < epsilon:
             action = env.action_space.sample()
-            #return random.randrange(0,self.number_actions)
         else:
-            action = np.argmax(self.Qtable[state])
-
-        self.step_count += 1
-
-        #if  and self.epsilon >= self.epsilon_min:
-        if self.step_count % 100 == 0 and self.epsilon >= self.epsilon_min:
-            self.epsilon -= self.epsilon/1000
+            action = self._get_action(state)
         return action
+
+    def _adjust_learning_rate(self, episode):
+        # TODO
+        if True: 
+            a = None
+
+    def _train_model(self):
+        if len(self.memory) < self.config.training.batch_size:
+            return
+        transitions = self.memory.sample(self.config.training.batch_size)
+        # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
+        # detailed explanation). This converts batch-array of Transitions
+        # to Transition of batch-arrays.
+        # >>> zip(*[('a', 1), ('b', 2), ('c', 3)]) === zip(('a', 1), ('b', 2), ('c', 3))
+        # [('a', 'b', 'c'), (1, 2, 3)]
+        batch = Transition(*zip(*transitions))
+
+        state_batch = torch.cat(batch.state)
+        action_batch = torch.cat(batch.action)
+        reward_batch = torch.cat(batch.reward)
+        next_state_batch = torch.cat(batch.next_state)
+        done_batch = torch.cat(batch.done)
 
     def update(self, state, new_state, reward, action):
         """
@@ -205,16 +263,48 @@ def navigate(agent, alpha, gamma, epochs, operation, steps_max):
     return total_actions, rewards, frames, penalties, steps, dropoffs
 
 """ Training setup """
-alpha = 0.35 # Learning rate
-gamma = 0.99 # Discount factor, greedy (0) vs long term (1)
-epochs_training = 10000
-steps_max_training = 1000
-epsilon = 0.53 # Improve to be proportional to nubmer of steps and epochs taken?
+Transition = namedtuple('Transition',
+    ('state', 'action', 'next_state', 'reward', 'done'))
+
+training = {
+    batch_size: 128,
+    learning_rate: 0.001,
+    loss: "huber",
+    num_episodes: 10000,
+    train_steps: 1000000,
+    warmup_episode: 10,
+    save_freq: 1000,
+}
+
+optimizer = {
+    name: adam,
+   lr_min: 0.0001,
+   lr_decay: 5000,
+}
+
+rl = {
+   gamma: 0.99,
+   max_steps_per_episode: 100,
+   target_model_update_episodes: 20,
+   max_queue_length: 50000,
+   }
+
+epsilon = {
+   max_epsilon: 1,
+   min_epsilon: 0.1,
+   decay_epsilon: 400,
+}
+
+config = {
+        "training": training,
+        "optimizer": optimizer,
+        "rl": rl,
+        "epsilon": epsilon,
+}
 
 #clear_output(wait=True)
 #clear()
-agent = Agent(env, epsilon)
-operation = 'training'
+agent = Agent(env, config)
 outputs = []
 plt.ion()
 outputs = navigate(agent, alpha, gamma, epochs_training, operation=operation, steps_max=steps_max_training)

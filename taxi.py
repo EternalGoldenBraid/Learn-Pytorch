@@ -105,6 +105,15 @@ class DQN(nn.module):
         #self.conv1 = nn.conv2d(12,6,kernel_size=5, stride=2)
         #self.bn1 = nn.BatchNorm2d(12)
 
+        # Compute size of outputs of conv2d
+        # CONFIRM THE MATH? WHAT AND WHY?
+        #def conv2d_size_out(size, kernel_size=5, stride =2):
+        #    return (size- (kernel_size-1) -1)//stride + 1
+        #convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(w)))
+        #convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(h)))
+        #linear_input_size = convw*convh*32
+        #self.head = nn.Linear(linear_input_size, outputs)
+
     def forward(self, x):
         x = x.to(device)
         x = F.relu(self.l1(self.emb(x)))
@@ -129,9 +138,8 @@ class Agent:
         self.rng = default_rng(SEED)
         self.number_states = env.observation_space.n
         self.number_actions = env.action_space.n
-        self.Qtable=self.rng.random((self.number_states,self.number_actions))
-        self.epsilon = config["epsilon"]
-        self.epsilon_min = self.epsilon*1e-4
+        #self.Qtable=self.rng.random((self.number_states,self.number_actions))
+        self.config = Config
         self.step_count = 0
         self.device = device
         self.memory = None
@@ -141,15 +149,16 @@ class Agent:
         n_actions = self.number_actions
 
         self.model = DQN(n_actions).to(self.device)
-        self.targe_model = DQN(n_actions).to(self.device)
+        self.target_model = DQN(n_actions).to(self.device)
         self.target_model.eval() # Evaluation mode. train = false
         self.optimizer = optim.Adam(self.model.parameters(), 
                 lr=self.config["training"]["learning_rate"])
 
     def _get_epsilon(self,episode):
-        eps = self.epsilon
-        epsilon = eps["min_epsilon"] + (eps["max_epsilon"] - eps["min_epsilon"])*\
-                np.exp(-episode / eps["decay_epsilon"])
+        eps_min = self.config.epsilon.epsilon_min
+        eps_max = self.config.epsilon.epsilon_max
+        eps_decay = self.config.epsilon.decay_epsilon
+        epsilon = eps_min + (eps_max-eps_min)*np.exp(-episode/decay_epsilon)
                 
     def _get_action(self, state):
         with torch.no_grad():
@@ -275,41 +284,31 @@ def navigate(agent, alpha, gamma, epochs, operation, steps_max):
 Transition = namedtuple('Transition',
     ('state', 'action', 'next_state', 'reward', 'done'))
 
-training = {
-    batch_size: 128,
-    learning_rate: 0.001,
-    loss: "huber",
-    num_episodes: 10000,
-    train_steps: 1000000,
-    warmup_episode: 10,
-    save_freq: 1000,
-}
+class Config:
+    class Training:
+        batch_size = 128,
+        learning_rate = 0.001,
+        loss = "huber",
+        num_episodes = 10000,
+        train_steps = 1000000,
+        warmup_episode = 10,
+        save_freq = 1000,
 
-optimizer = {
-    name: adam,
-   lr_min: 0.0001,
-   lr_decay: 5000,
-}
+    class optimizer:
+        name = adam,
+        lr_min = 0.0001,
+        lr_decay = 5000,
 
-rl = {
-   gamma: 0.99,
-   max_steps_per_episode: 100,
-   target_model_update_episodes: 20,
-   max_queue_length: 50000,
-   }
-
-epsilon = {
-   max_epsilon: 1,
-   min_epsilon: 0.1,
-   decay_epsilon: 400,
-}
-
-config = {
-        "training": training,
-        "optimizer": optimizer,
-        "rl": rl,
-        "epsilon": epsilon,
-}
+    class rl:
+        gamma = 0.99,
+        max_steps_per_episode = 100,
+        target_model_update_episodes = 20,
+        max_queue_length = 50000,
+    
+    class epsilon:
+        max_epsilon = 1,
+        min_epsilon = 0.1,
+        decay_epsilon = 400,
 
 #clear_output(wait=True)
 #clear()

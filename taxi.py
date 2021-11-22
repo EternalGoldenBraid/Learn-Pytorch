@@ -25,6 +25,7 @@ from numpy.random import default_rng
 from IPython.display import clear_output
 from time import sleep
 from os import system
+from itertools import count
 
 import torch
 import torch.nn as nn
@@ -143,6 +144,8 @@ class Agent:
         self.step_count = 0
         self.device = device
         self.memory = None
+        self.loss = None
+        self.model = None
 
     def compile(self):
         """ Initialize the model """
@@ -152,7 +155,9 @@ class Agent:
         self.target_model = DQN(n_actions).to(self.device)
         self.target_model.eval() # Evaluation mode. train = false
         self.optimizer = optim.Adam(self.model.parameters(), 
-                lr=self.config["training"]["learning_rate"])
+                lr=self.config.training.learning_rate)
+        #self.optimizer = optim.Adam(self.model.parameters(), 
+                #lr=self.config["training"]["learning_rate"])
 
     def _get_epsilon(self,episode):
         eps_min = self.config.epsilon.epsilon_min
@@ -204,17 +209,62 @@ class Agent:
         predicted_q_value = self.model(state_batch).gather(1, action_batch.unsqueeze(1))
 
         # Compute the expected Q values
+        # t.max(1) will return largest column value of each row.
+        # First column on max result is max element for each row.
+        # Target networks perceived Q values for next states following training
+        # networks "choice" of action.
         next_state_values = self.target_model(next_state_batch).max(1)[0]
-        expected_q_values = (~done_batch * next_state_values * self.config["rl"]["gamma"]) + reward_batch
+        expected_q_values = (~done_batch * next_state_values * self.config.rl.gamma) + reward_batch
+        #expected_q_values = (~done_batch * next_state_values * self.config["rl"]["gamma"]) + reward_batch
 
-    def update(self, state, new_state, reward, action):
-        """
-        Update the Qtable after an action results in new state and reward.
-        """
+        # Compute Huber loss.
+        loss_function = nn.SmoothL1Loss()
+        loss = self.loss_function(predicted_q_value, expected_q_values.unsqueeze(1))
 
-        old_value = self.Qtable[state][action]
-        self.Qtable[state][action] = old_value + alpha*(reward+gamma*np.max(self.Qtable[new_state]) - old_value)
-        #self.Qtable[state][action] = (1-alpha)*old_value + alpha*(reward+gamma*np.max(self.Qtable[new_state]))
+        # Optimize model
+        self.optimizer.zero_grad()
+        loss.backward()
+        for param in self.model.parameters():
+            param.grad.data.clam_(-1,1)
+        self.optimizer.step()
+
+
+    def _update_target(self):
+        self.target_model.load_state_dict(self.model.state_dict())
+
+    def _remember(self, state, action, next_state, reward, done):
+        self.memory.push(torch.tensor([state], device=self.device),
+                        torch.tensor([action], device=self.device, dtype=torch.long),
+                        torch.tensor([next_state], device=self.device),
+                        torch.tensor([reward], device=self.device),
+                        torch.tensor([done], device=self.device, dtype=torch.bool))
+
+    def fit(self):
+        # Stateless counterpart for nn.SmoothL1Loss()
+        self.loss = F.smooth_l1_loss
+        self.memory= ReplayMemory(self.config.rl.max_queue_length)
+
+        epsilon = 1
+
+        for i_episode in range(self.config.num_episodes):
+            state = self.env.reset()
+            if i_episode >= self.config.training.warmup_episode:
+                epsilon = self._get_epsilon(i_episode - self.config.training.warmup_episode)
+
+            for step in count():
+                action = _get_action(state, epsilon)
+                next_state, reward, done, _ = self.env.step(action)
+
+                self._remember(state, action, next_state, reward, done)
+
+                if i_episode >= self.config.training.warmup_episode:
+                    self._train_model()
+                    #self._adjust_learning_rate(i_episode - self.config.training.warmup_episode + 1) # TODO
+                    done = (step == self.config.rl.max_steps_per_episode - 1) or done
+                else:
+                    done = (step == 5 * self.config.rl.max_steps_per_episode -1) or done # Justify choice of magic number!
+
+        ## TO DO CONTINUE HERE
 
 def navigate(agent, alpha, gamma, epochs, operation, steps_max):
 

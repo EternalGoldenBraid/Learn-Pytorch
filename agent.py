@@ -12,13 +12,12 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.transforms as T
 
+import time
+import os
+
 from memory import ReplayMemory, Transition
 
 SEED = 42
-
-# if gpu is to be used
-#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = "cpu"
 
 # Environment
 #env = gym.make("Taxi-v3") # Step limit == 200
@@ -27,7 +26,7 @@ env.reset()
 #env.render()
 
 class Agent:
-    def __init__(self, env, config, model_class):
+    def __init__(self, env, config, model_class, device):
         self.env = env
         self.seed=SEED
         self.rng = default_rng(SEED)
@@ -45,6 +44,7 @@ class Agent:
         n_actions = self.number_actions
 
         self.model = self.model_class(n_actions).to(self.device)
+        self.model.to(self.device)
         self.target_model = self.model_class(n_actions).to(self.device)
         self.target_model.eval() # Evaluation mode. train = false
         self.optimizer = optim.Adam(self.model.parameters(), 
@@ -113,14 +113,14 @@ class Agent:
         #expected_q_values = (~done_batch * next_state_values * self.config["rl"]["gamma"]) + reward_batch
 
         # Compute Huber loss.
-        loss_function = nn.SmoothL1Loss()
+        self.loss_function = nn.SmoothL1Loss()
         loss = self.loss_function(predicted_q_value, expected_q_values.unsqueeze(1))
 
         # Optimize model
         self.optimizer.zero_grad()
         loss.backward()
         for param in self.model.parameters():
-            param.grad.data.clam_(-1,1)
+            param.grad.data.clamp(-1,1)
         self.optimizer.step()
 
 
@@ -134,12 +134,15 @@ class Agent:
             torch.tensor([reward], device=self.device),
             torch.tensor([done], device=self.device, dtype=torch.bool))
 
-    def fit(self, verbose:bool=False):
+    def fit(self, path, verbose:bool=False):
         # Stateless counterpart for nn.SmoothL1Loss()
         self.loss = F.smooth_l1_loss
         self.memory= ReplayMemory(self.config.rl.memory_capacity)
 
         epsilon = 1
+
+        print(f"Running {self.config.rl.num_episodes} episodes!")
+        input()
 
         for i_episode in range(self.config.rl.num_episodes):
 
@@ -150,29 +153,65 @@ class Agent:
                 epsilon = self._get_epsilon(
                         i_episode - self.config.training.warmup_episode)
 
+            avg_r = 0
             for step in count():
                 action = self._choose_action(state, epsilon)
                 next_state, reward, done, _ = self.env.step(action)
+                avg_r += reward
 
                 self._remember(state, action, next_state, reward, done)
+
+                # DEBUBG
+                #if done:
+                #    print("Episode: ",i_episode)
+                #    print("     steps: ", step)
+                #    print("     epsilon: ", epsilon)
+                # DEBUBG
 
                 if i_episode >= self.config.training.warmup_episode:
                     self._train_model()
                     #self._adjust_learning_rate(i_episode - self.config.training.warmup_episode + 1) # TODO
                     done = (step == self.config.rl.max_steps_per_episode - 1) or done
                 else:
-                    done = (step == 5 * self.config.rl.max_steps_per_episode -1) or done # Justify choice of magic number!
+                    # Justify choice of magic number!
+                    done = (step == 5 * self.config.rl.max_steps_per_episode -1) or done 
+                if done: 
+                    if verbose:
+                        print("Average reward: ", avg_r)
+                    break
+    
+            # Update target network every C episode
+            if i_episode % self.config.rl.target_model_update_freq == 0:
+                self._update_target()
 
-                if done: break
-        
-        # Update target network every C episode
-        if i_episode % self.config.rl.target_model_update_freq == 0:
-            self._update_target()
+            # Save weights, Necessary?
+            if i_episode % self.config.training.save_freq == 0:
+                #self.save()
+                torch.save(self.model.state_dict(), path)
+                print("Saved")
 
-        # Save weights, Necessary?
-        #if i_episode % self.config.training.save_freq == 0:
-        #    self.save()
+    def play(self, verbose:bool=False, sleep:float=0.1, max_steps:int=100):
+        # Play an episode
+        actions_str = ["South", "North", "East", "West", "Pickup", "Dropoff"]
 
-""" Training setup """
-#Transition = namedtuple('Transition',
-    #('state', 'action', 'next_state', 'reward', 'done'))
+        iteration = 0
+        state = self.env.reset()  # reset environment to a new, random state
+        self.env.render()
+        if verbose:
+            print(f"Iter: {iteration} - Action: *** - Reward ***")
+        time.sleep(sleep)
+        done = False
+
+        while not done: 
+            action = self._get_action(state) 
+            iteration += 1 
+            state, reward, done, info = self.env.step(action) 
+            #display.clear_output(wait=True) 
+            self.env.render() 
+            if verbose: 
+                print(
+                f"Iter: {iteration} - Action: {action}({actions_str[action]}) - Reward {reward}") 
+            time.sleep(sleep) 
+            if iteration >= max_steps: 
+                print("cannot converge :(")
+                break

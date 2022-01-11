@@ -1,0 +1,125 @@
+- model: dq
+  operations:
+    train:
+      main: main
+      flags-import: all
+
+      flags-dest: args
+      flags-import: yes
+      requires:
+        - file: config.yaml
+
+        #flags:
+        #    batch_size:
+        #      default: 512
+        #      choices: [128,512]
+        #    learning_rate:
+        #      default: 0.004          
+        #      choices: [0.001, 0.004, 0.01]
+        #    loss:
+        #      default: "huber"
+        #    warmup_episode:
+        #      default: 100
+        #    save_freq: 
+        #      default: 1000
+
+        #    optimizer: 
+        #      default: "adam"
+        #    lr_min : 0.0001
+        #    lr_decay : 5000
+
+        #    # rl
+        #    gamma : 0.99
+        #    max_steps_per_episode:
+        #      default: 200
+        #      choices: [200, 100, 10]
+        #    target_model_update_freq : 20
+        #    memory_capacity : 50000
+        #    num_episodes:
+        #      default: 100
+        #      choices: [200, 100, 10]
+        #    
+        #    # epsilon
+        #    max_epsilon : 1
+        #    min_epsilon : 0.1
+        #    decay_epsilon : 600
+
+
+            #flags-dest: config:config.yaml
+            #flags-import: all
+            #
+
+      output-scalars: 
+        - avg_rw: 'c Average reward: (\value)'
+          #- avg_a: 'c Average number of actions: (\value)'
+          #- step: 'testing epoch: (\step)'
+          #- '- (\key): (\value)'
+          #- 'testing epoch: (?P<step>\step) - Steps: (?P<steps>\value) - penalties: (?P<pen>\value)'
+    debug:
+      description: Simple values for dbg
+      main: main
+      flags:
+          steps_max:
+            description: Number of steps per epoch
+            default: 300
+          epochs_training:
+            description: Number of epochs for training
+            default: 500
+          epochs_testing:
+            description: Number of epochs for testing
+            default: 100
+          steps_max_training: 
+            description: Maximum step count per epoch
+            default: 10001
+          steps_max_testing: 
+            description: Maximum step count per epoch
+            default: 1000
+          alpha:
+            description: Learning rate
+            default: 0.001
+          gamma: 
+            description: Discount of future rewards.
+            default: 0.001
+          epsilon:
+            description: Ratio of random actions. Eploration vs exploitation.
+            default: 0.1
+      output-scalars: 
+        - avg_a: '     c Average number of actions: (\value)'
+        - avg_rw: '     c Average reward per epoch: (\value)'
+        #- step: 'testing epoch: (\step)'
+        #- '- (\key): (\value)'
+          #- 'testing epoch: (?P<step>\step) - Steps: (?P<steps>\value) - penalties: (?P<pen>\value)'
+    test:
+      description: Use predefined Q-table to run evaluate model.
+      main: main
+      flags:
+          batch_size:
+            description: NaN
+            default: 32
+          num_classes:
+            description: Number of classes
+            default: 10
+          epochs_training:
+            description: Number of epochs
+            default: 50
+          lr:
+            description: learning rate
+            default: 0.001
+              #choices: [0.00001, 0.001, 0.05, 0.3, 0.5]
+          decay:
+            description: decay for RMSprop
+            default: 0.001
+              #choices: [0.00001, 0.001, 0.05, 0.3, 0.5]
+          DEBUG: 
+            default: False
+            choices: [False]
+          BATCH_NUMBER:
+            description: Choose data batch
+            default: 'all'
+            choices: [1, 2, 3, 4, 5, 'all']
+      output-scalars: 
+        - step: 'Epoch (\step)'
+        - accuracy: 'acc: (\value)'
+        - loss: 'loss: (\value)'
+      requires:
+        - data

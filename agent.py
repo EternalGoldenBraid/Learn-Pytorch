@@ -48,14 +48,14 @@ class Agent:
         self.target_model = self.model_class(n_actions).to(self.device)
         self.target_model.eval() # Evaluation mode. train = false
         self.optimizer = optim.Adam(self.model.parameters(), 
-                lr=self.config.training.learning_rate)
+                lr=self.config["training"]["learning_rate"])
         #self.optimizer = optim.Adam(self.model.parameters(), 
                 #lr=self.config["training"]["learning_rate"])
 
     def _get_epsilon(self,episode):
-        eps_min = self.config.epsilon.min_epsilon
-        eps_max = self.config.epsilon.max_epsilon
-        eps_decay = self.config.epsilon.decay_epsilon
+        eps_min = self.config["epsilon"]["min_epsilon"]
+        eps_max = self.config["epsilon"]["max_epsilon"]
+        eps_decay = self.config["epsilon"]["decay_epsilon"]
         epsilon = eps_min + (eps_max-eps_min)*np.exp(-episode/eps_decay)
         return epsilon
                 
@@ -82,9 +82,9 @@ class Agent:
 
     def _train_model(self):
         """ Calculate loss and update weights """
-        if len(self.memory) < self.config.training.batch_size:
+        if len(self.memory) < self.config["training"]["batch_size"]:
             return
-        transitions = self.memory.sample(self.config.training.batch_size)
+        transitions = self.memory.sample(self.config["training"]["batch_size"])
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
         # to Transition of batch-arrays.
@@ -109,7 +109,7 @@ class Agent:
         # Target networks perceived Q values for next states following training
         # networks "choice" of action.
         next_state_values = self.target_model(next_state_batch).max(1)[0]
-        expected_q_values = (~done_batch * next_state_values * self.config.rl.gamma) + reward_batch
+        expected_q_values = (~done_batch * next_state_values * self.config["rl"]["gamma"]) + reward_batch
         #expected_q_values = (~done_batch * next_state_values * self.config["rl"]["gamma"]) + reward_batch
 
         # Compute Huber loss.
@@ -137,21 +137,16 @@ class Agent:
     def fit(self, path, verbose:bool=False):
         # Stateless counterpart for nn.SmoothL1Loss()
         self.loss = F.smooth_l1_loss
-        self.memory= ReplayMemory(self.config.rl.memory_capacity)
-
+        self.memory= ReplayMemory(self.config["rl"]["memory_capacity"])
         epsilon = 1
-
-        print(f"Running {self.config.rl.num_episodes} episodes!")
-        input()
-
-        for i_episode in range(self.config.rl.num_episodes):
+        for i_episode in range(self.config["rl"]["num_episodes"]):
 
             if verbose: print("Episode: ", i_episode)
 
             state = self.env.reset()
-            if i_episode >= self.config.training.warmup_episode:
+            if i_episode >= self.config["training"]["warmup_episode"]:
                 epsilon = self._get_epsilon(
-                        i_episode - self.config.training.warmup_episode)
+                        i_episode - self.config["training"]["warmup_episode"])
 
             avg_r = 0
             for step in count():
@@ -161,31 +156,24 @@ class Agent:
 
                 self._remember(state, action, next_state, reward, done)
 
-                # DEBUBG
-                #if done:
-                #    print("Episode: ",i_episode)
-                #    print("     steps: ", step)
-                #    print("     epsilon: ", epsilon)
-                # DEBUBG
-
-                if i_episode >= self.config.training.warmup_episode:
+                if i_episode >= self.config["training"]["warmup_episode"]:
                     self._train_model()
-                    #self._adjust_learning_rate(i_episode - self.config.training.warmup_episode + 1) # TODO
-                    done = (step == self.config.rl.max_steps_per_episode - 1) or done
+                    #self._adjust_learning_rate(i_episode - self.config["training"]["warmup_episode"] + 1) # TODO
+                    done = (step == self.config["rl"]["max_steps_per_episode"] - 1) or done
                 else:
                     # Justify choice of magic number!
-                    done = (step == 5 * self.config.rl.max_steps_per_episode -1) or done 
+                    done = (step == 5 * self.config["rl"]["max_steps_per_episode"] -1) or done 
                 if done: 
                     if verbose:
-                        print("Average reward: ", avg_r)
+                        print(f"Average reward: {avg_r/step:.2f}")
                     break
     
             # Update target network every C episode
-            if i_episode % self.config.rl.target_model_update_freq == 0:
+            if i_episode % self.config["rl"]["target_model_update_freq"] == 0:
                 self._update_target()
 
             # Save weights, Necessary?
-            if i_episode % self.config.training.save_freq == 0:
+            if i_episode % self.config["training"]["save_freq"] == 0:
                 #self.save()
                 torch.save(self.model.state_dict(), path)
                 print("Saved")

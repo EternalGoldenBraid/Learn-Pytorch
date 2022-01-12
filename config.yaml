@@ -1,8 +1,7 @@
 training:
-    batch_size: 128
-    learning_rate: 0.001
+    batch_size: 512
+    learning_rate: 0.004
     loss: "huber"
-    num_episodes: 10000
     train_steps: 1000000
     warmup_episode: 100
     save_freq: 1000
@@ -17,7 +16,7 @@ rl:
     max_steps_per_episode: 200
     target_model_update_freq: 20
     memory_capacity: 50000
-    num_episodes: 2000
+    num_episodes: 100
 
 epsilon:
     max_epsilon: 1
